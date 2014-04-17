@@ -35,7 +35,6 @@ rvm_t rvm_init(const char *directory)
 	rvm_t rvm;
 	char temp[200];
 	struct stat filestat;
-
 	
 	logfile_path =	(char*)malloc(200*sizeof(char));
 	
@@ -47,10 +46,9 @@ rvm_t rvm_init(const char *directory)
 	
 	int filestatus = stat(directory, &filestat);
 		
-	if( filestatus >= 0)
+	if( filestatus >= 0) {
 		printf("Directory already exists");
-	else
-	{
+    } else {
 		system(temp);
 	}
 
@@ -66,12 +64,12 @@ rvm_t rvm_init(const char *directory)
 
 void* rvm_map(rvm_t rvm, const char *segname, int size_to_create)
 {
-	if(rvm.dir == NULL)
-	{
-		printf("Empty Directory");exit(-1);
+	if(rvm.dir == NULL) {
+		printf("Empty Directory");
+        exit(-1);
 	}
 	
-	struct segment *N = (struct segment *)malloc(sizeof(struct segment));
+	struct segment *N = (struct segment *)malloc (sizeof(struct segment));
 	struct stat filestat;
 	char temp[200];
 	struct segment *Segments = NULL;
@@ -82,148 +80,118 @@ void* rvm_map(rvm_t rvm, const char *segname, int size_to_create)
 	strcat(temp,segname);
 	int filestatus = stat(temp, &filestat);
 
-	if(Head == NULL) //Linked list empty
-	{
+	if(Head == NULL) {
 	//Enter first element into the linked list
 
-	Segments = (struct segment *)malloc(sizeof(struct segment));
+        Segments = (struct segment *)malloc(sizeof(struct segment));
        	Segments->segment = (char*)malloc(sizeof(char)*size_to_create);
-	Segments->segpath = (char*)malloc(sizeof(char)*100);
-	Segments->segname=(char*)malloc(sizeof(char)*100);
+        Segments->segpath = (char*)malloc(sizeof(char)*100);
+        Segments->segname=(char*)malloc(sizeof(char)*100);
+        
+        //File exists in directory 
+        if( filestatus >=0) {
+            backstore = fopen(temp,"r");
+            //Here do I need to copy the data from the external file into the virtual memory i.e Segments->segment ?
+        
+            strcpy(Segments->segpath,segname);
+            strcpy(Segments->segname,segname);
+        
+            Segments->mapped = 1;
+            Segments->rvm = rvm;
+            Segments->next = NULL;
+            Head = Segments;
+            segmentlistflag=1;
 
-	if( filestatus >=0) //File exists in directory
-	{
-		backstore = fopen(temp,"r");
-		//Here do I need to copy the data from the external file into the virtual memory i.e Segments->segment ?
-	
-		strcpy(Segments->segpath,segname);
-		strcpy(Segments->segname,segname);
-	
-		Segments->mapped = 1;
-		Segments->rvm = rvm;
-		Segments->next = NULL;
-		Head = Segments;
-		segmentlistflag=1;
+            fclose(backstore);
+            fflush(backstore);
+        
+        
+        } else {
+		
+            backstore = fopen(temp,"w");
+        
+            strcpy(Segments->segpath,segname);
+            strcpy(Segments->segname,segname);
+        
+            Segments->mapped = 1;
+            Segments->rvm = rvm;
+            Segments->next = NULL;
+            Head = Segments;
+            segmentlistflag=1;
 
-		fclose(backstore);
-		fflush(backstore);
-	
-	
-	}
-	else//File does not exist in directory
-	{
-		
-		backstore = fopen(temp,"w");
-	
-		strcpy(Segments->segpath,segname);
-		strcpy(Segments->segname,segname);
-	
-		Segments->mapped = 1;
-		Segments->rvm = rvm;
-		Segments->next = NULL;
-		Head = Segments;
-		segmentlistflag=1;
+            fclose(backstore);
+            fflush(backstore);
+        }
 
-		fclose(backstore);
-		fflush(backstore);
-	}
+        return Segments->segment;
+	} else {
+        if(filestatus >=0) {
+            backstore = fopen(temp,"r"); //Im not sure if something needs to be done with the external file opened at this stage
+            Segments = Head;		
+        
+            while(Segments != NULL) {
+                if(strcmp(Segments->segname,segname) == 0) {
+                    if(Segments->mapped == 1) {
+                        printf("ERROR ! Segment already mapped");
+                        exit(-1);
+                    } else {
+                        if(Segments->segsize < 	size_to_create) {
+                            Segments->segment = (char*)realloc(Segments->segment,sizeof(char)*size_to_create);
+                        }
+                    }
+                    Segments->mapped =1 ;
+                    Segments->segpath = NULL ; 
+                    fclose(backstore);
+                    fflush(backstore);
+        
+                    return Segments->segment;			
+                
+                }	
+                if(Segments->next == NULL) {
+                    crash = 1;
+                    break ;
+                }
+            }
+            
+            if(crash ==1) {	//Crash Recovery code here
+            }
+            
+            fclose(backstore);
+            fflush(backstore);
+        
+        } else {
+            backstore = fopen(temp,"w");
+            Segments = Head;
+            while (Segments->next != NULL) {
+                Segments = Segments->next;
+            }
+            
+            N->segment =(char*)malloc(sizeof(char)*size_to_create);
+            N->segpath = (char*)malloc(sizeof(char)*100);
+            N->rvm = rvm;
 
-	return Segments->segment;
-	}
-	else //Linked List is not Empty
-	{
-	if(filestatus >=0)//File exists in directory.
-	{
-		backstore = fopen(temp,"r"); //Im not sure if something needs to be done with the external file opened at this stage
-		Segments = Head;		
-	
-		while(Segments != NULL)
-		{
-			if(strcmp(Segments->segname,segname) == 0)
-			{
-				if(Segments->mapped == 1)
-				{
-					printf("ERROR ! Segment already mapped");
-					exit(-1);
-				}
-				else
-				{
-					if(Segments->segsize < 	size_to_create)
-					{
-						Segments->segment = (char*)realloc(Segments->segment,sizeof(char)*size_to_create);
-					}
-					
-					
-				}
-				Segments->mapped =1 ;
-				Segments->segpath = NULL ; 
-				fclose(backstore);
-				fflush(backstore);
-	
-				return Segments->segment;			
-			
-			}	
-			if(Segments->next == NULL)
-			{
-			crash =1;
-			break ;
-			}
+            N->segname=(char*)malloc(sizeof(char)*100);
+            strcpy(N->segpath,segname);
+            strcpy(N->segname,segname);
+            N->mapped = 1;
+            N->next = NULL;
+            Segments->next = N;
+            Segments = Segments->next;
 
-		
-		}
-		
-		if(crash ==1)
-		{	//Crash Recovery code here
-		}
-		
-		
-		fclose(backstore);
-		fflush(backstore);
-	
-	}
-	else // File does not exist in directory
-	{
-		backstore = fopen(temp,"w");
-		Segments = Head;
-		while (Segments->next != NULL)
-		{
-			Segments = Segments->next;
-		}
-		
-		N->segment =(char*)malloc(sizeof(char)*size_to_create);
-		N->segpath = (char*)malloc(sizeof(char)*100);
-		N->rvm = rvm;
-
-		N->segname=(char*)malloc(sizeof(char)*100);
-		strcpy(N->segpath,segname);
-		strcpy(N->segname,segname);
-		N->mapped = 1;
-		N->next = NULL;
-		Segments->next = N;
-		Segments = Segments->next;
-		
-
-		fclose(backstore);
-		fflush(backstore);
+            fclose(backstore);
+            fflush(backstore);
+        }
 	}
 	
-
-	
-		
-	}
-	
-return Segments->segment;
-
+    return Segments->segment;
 }
 
 void rvm_unmap(rvm_t rvm, void *segbase)
 {
 	struct segment *Segments = Head;
 	
-	while(Segments != NULL)
-	{
-        if (Segments->segment == segbase)
-		{
+	while(Segments != NULL) {
+        if (Segments->segment == segbase) {
 			Segments->mapped = 0;
 			Segments->segpath = NULL;
 			return;
