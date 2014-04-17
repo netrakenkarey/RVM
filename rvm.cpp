@@ -23,13 +23,9 @@ struct segment {
 
 
 int rvmid_count = 0;
-int number_dir = 0;
 int segmentlistflag = 0;
 FILE *backstore;
 
-
-char *logfile_path;
- 
 struct segment *Head;
 
 rvm_t rvm_init(const char *directory)
@@ -38,12 +34,11 @@ rvm_t rvm_init(const char *directory)
 	char temp[200];
 	struct stat filestat;
 	
-	logfile_path =	(char*)malloc(200*sizeof(char));
-	
 	strcpy(temp , "mkdir ");
 	strcat(temp , directory);
 
 	strcpy(rvm.dir,directory);
+    rvm.dir = strdup(directory);
 	rvm.rvmid = ++rvmid_count;
 	
 	int filestatus = stat(directory, &filestat);
@@ -53,14 +48,7 @@ rvm_t rvm_init(const char *directory)
     } else {
 		system(temp);
 	}
-
-	strcpy(temp , directory);
-	strcat(temp , "/logfile");
 	
-	strcpy(logfile_path , temp);
-	
-	number_dir++;
-
 	return rvm;
 }
 

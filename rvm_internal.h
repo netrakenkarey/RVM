@@ -2,7 +2,7 @@
 #define __LIBRVMINTERNAL__
 
 typedef struct rvm {
-	char dir[200];
+	char *dir;
 	int rvmid;
 } rvm_t;
 
