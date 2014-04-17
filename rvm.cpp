@@ -1,4 +1,3 @@
-using namespace std;
 #include "rvm.h"
 #include <unistd.h>
 #include <stdio.h>
@@ -6,9 +5,9 @@ using namespace std;
 #include <string.h>
 #include <sys/types.h>
 #include <sys/stat.h>
-
 #include <vector>
 
+using namespace std;
 
 struct segment {
 	rvm_t rvm;
@@ -46,6 +45,31 @@ rvm_t rvm_init(const char *directory)
 	return rvm;
 }
 
+static void apply_log(void *segbase, char *log)
+{
+    strtok(log, " ");
+    int offset = atoi(strtok(NULL, " "));
+    int size = atoi(strtok(NULL, " "));
+    void *data = strtok(NULL, " ");
+    memcpy((char *) segbase + offset, data, size);
+}
+
+static void recover_data(const char *segname, void *segbase, int size, FILE *fp)
+{
+    char *line = NULL;
+    ssize_t result;
+
+    // read base file
+    fread(segbase, size, 1, fp);
+    result = getline(&line, NULL, fp);
+    while (result != -1) {
+        apply_log(segbase, line);
+        free(line);
+        line = NULL;
+        result = getline(&line, NULL, fp);
+    }
+}
+
 void* rvm_map(rvm_t rvm, const char *segname, int size_to_create)
 {
 	if(rvm.dir == NULL) {
@@ -60,6 +84,7 @@ void* rvm_map(rvm_t rvm, const char *segname, int size_to_create)
 	strcat(temp,"/");
 	strcat(temp,segname);
 	int filestatus = stat(temp, &filestat);
+    int recover = 0;
 
     // file already exists
     if (filestatus == 0) {
@@ -73,8 +98,7 @@ void* rvm_map(rvm_t rvm, const char *segname, int size_to_create)
                 return segments[i].segment;
             }
         }
-
-        // TODO: recovery
+        recover = 1;
     }
 
     struct segment seg;
@@ -83,6 +107,13 @@ void* rvm_map(rvm_t rvm, const char *segname, int size_to_create)
     seg.rvm = rvm;
     seg.segsize = size_to_create;
     seg.tid = -1;
+
+    if (recover) {
+        FILE *fp = fopen(temp, "r");
+        recover_data(seg.segname, seg.segment, seg.segsize, fp);
+        fclose(fp);
+    }
+
     segments.push_back(seg);
 
     return seg.segment;
@@ -205,10 +236,15 @@ static void save_log(void *segbase, int offset, int size, void *data)
     }
     if (i >= 0) {
         char path[256];
-        snprintf(path, sizeof(path), "%s/%s", segments[i].rvm.dir, segments[i].segname);
+        snprintf(path, sizeof(path), "%s/logfile", segments[i].rvm.dir);
         FILE *f = fopen(path, "a");
-        fwrite(((char *) data) + offset, size, 1, f);
-        fprintf(f, "\n%d %d\n", offset, size);
+
+        char *data_s = (char *) malloc(sizeof(char) * (size+1));
+        memcpy(data_s, data, size);
+        data_s[size] = 0;
+
+        fprintf(f, "%s %d %d %s\n", segments[i].segname, offset, size, data_s);
+        free(data_s);
         fclose(f);
     }
 }
