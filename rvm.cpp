@@ -200,6 +200,7 @@ void rvm_commit_trans(trans_t tid)
     while (it != undo_records.end()) {
         if (it->tid == tid) {
             save_log(it->segbase, it->offset, it->size, it->data);
+            free(it->data);
             it = undo_records.erase(it);
         } else {
             it++;
@@ -210,6 +211,17 @@ void rvm_commit_trans(trans_t tid)
 
 void rvm_abort_trans(trans_t tid)
 {
+    vector<undo_record>::iterator it = undo_records.begin();
+    while (it != undo_records.end()) {
+        if (it->tid == tid) {
+            save_log(it->segbase, it->offset, it->size, it->data);
+            free(it->data);
+            memcpy((char *)it->segbase + it->offset, it->data, it->size);
+            it = undo_records.erase(it);
+        } else {
+            it++;
+        }
+    }
     remove_trans_from_list(tid);
 }
 
