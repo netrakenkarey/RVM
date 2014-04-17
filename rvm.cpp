@@ -7,6 +7,8 @@ using namespace std;
 #include <sys/types.h>
 #include <sys/stat.h>
 
+#include <vector>
+
 
 struct segment {
 	rvm_t rvm;
@@ -210,63 +212,25 @@ struct transaction {
     rvm_t rvm;
     int numsegs;
     void **segbases;
-    struct transaction *next;
 };
 
 static trans_t counter = 0;
-static struct transaction *trans_begin;
-static struct transaction *trans_end;
+static vector<transaction> transactions;
 
-static struct transaction* find_trans(trans_t tid)
+static int find_trans(trans_t tid)
 {
-    struct transaction *trans = trans_begin;
-    while (trans) {
-        if (trans->id == tid) {
-            return trans;
+    for (unsigned int i = 0; i < transactions.size(); ++i) {
+        if (transactions[i].id == tid) {
+            return i;
         }
-        trans = trans->next;
     }
-    return NULL;
-}
-
-static void add_trans_to_list(struct transaction *trans)
-{
-    trans->next = NULL;
-    if (trans_end) {
-        trans_end->next = trans;
-        trans_end = trans;
-    } else {
-        trans_begin = trans_end = trans;
-    }
+    return -1;
 }
 
 static void remove_trans_from_list(trans_t tid)
 {
-    struct transaction *prev = trans_begin;
-    struct transaction *trans = prev->next;
-    if (prev) {
-        if (prev->id == tid) {
-            if (trans_end == trans_begin) {
-                trans_end = NULL;
-                trans_begin = NULL;
-            } else {
-                trans_begin = prev->next;
-            }
-            free(prev);
-        }
-        while (trans) {
-            if (trans->id == tid) {
-                free(trans);
-                prev->next = trans->next;
-                if (trans == trans_end) {
-                    trans_end = prev;
-                }
-                break;
-            }
-            prev = trans;
-            trans = trans->next;
-        }
-    }
+    int i = find_trans(tid);
+    transactions.erase(transactions.begin() + i);
 }
 
 trans_t rvm_begin_trans(rvm_t rvm, int numsegs, void **segbases) 
@@ -283,12 +247,12 @@ trans_t rvm_begin_trans(rvm_t rvm, int numsegs, void **segbases)
     }
 
     // add new transaction to list
-    struct transaction *trans = (transaction *) malloc(sizeof(struct transaction));
-    trans->id = counter++;
-    trans->rvm = rvm;
-    trans->numsegs = numsegs;
-    trans->segbases = segbases;
-    add_trans_to_list(trans);
+    struct transaction trans;
+    trans.id = counter++;
+    trans.rvm = rvm;
+    trans.numsegs = numsegs;
+    trans.segbases = segbases;
+    transactions.push_back(trans);
     return (trans_t) -1;
 }
 
@@ -298,38 +262,20 @@ struct undo_record {
     int offset;
     int size;
     void *data;
-    struct undo_record *next;
 };
 
-static struct undo_record *undo_begin;
-static struct undo_record *undo_end;
-
-static void add_undo_to_list(struct undo_record *undo)
-{
-    undo->next = NULL;
-    if (undo_end) {
-        undo_end->next = undo;
-        undo_end = undo;
-    } else {
-        undo_begin = undo_end = undo;
-    }
-}
-
-static void remove_undo_from_list(struct undo_record *undo)
-{
-}
+static vector<undo_record> undo_records;
 
 void rvm_about_to_modify(trans_t tid, void *segbase, int offset, int size)
 {
-    struct undo_record *record;
-    record = (undo_record *) malloc(sizeof(struct undo_record));
-    record->tid = tid;
-    record->segbase = segbase;
-    record->offset = offset;
-    record->size = size;
-    record->data = malloc(size);
-    memcpy(record->data, ((char *) segbase) + offset, size);
-    add_undo_to_list(record);
+    struct undo_record record;
+    record.tid = tid;
+    record.segbase = segbase;
+    record.offset = offset;
+    record.size = size;
+    record.data = malloc(size);
+    memcpy(record.data, ((char *) segbase) + offset, size);
+    undo_records.push_back(record);
 }
 
 static void save_log(struct undo_record *record)
@@ -338,26 +284,24 @@ static void save_log(struct undo_record *record)
 
 void rvm_commit_trans(trans_t tid)
 {
-    struct undo_record *record = undo_begin;
-    struct undo_record *next;
-    while (record) {
-        if (record->tid == tid) {
-            save_log(record);
-            next = record->next;
-            remove_undo_from_list(record);
-            record = next;
-        } else {
-            record = record->next;
-        }
-    }
+    /* struct undo_record *record = undo_begin; */
+    /* struct undo_record *next; */
+    /* while (record) { */
+    /*     if (record->tid == tid) { */
+    /*         save_log(record); */
+    /*         next = record->next; */
+    /*         remove_undo_from_list(record); */
+    /*         record = next; */
+    /*     } else { */
+    /*         record = record->next; */
+    /*     } */
+    /* } */
 
-    struct transaction *transaction = find_trans(tid);
     remove_trans_from_list(tid);
 }
 
 void rvm_abort_trans(trans_t tid)
 {
-    struct transaction *transaction = find_trans(tid);
     remove_trans_from_list(tid);
 }
 
