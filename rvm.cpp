@@ -14,12 +14,11 @@ struct segment {
 	char *segname;
 	void *segment;
 	int segsize;
-    trans_t tid;
 	struct segment *next;
 };
 
 static int rvmid_count = 0;
-static vector<segment> segments;
+static vector<segment*> segments;
 
 rvm_t rvm_init(const char *directory)
 {
@@ -62,6 +61,7 @@ static void recover_data(const char *segname, void *segbase, FILE *baseFp, FILE 
         line = NULL;
         result = getline(&line, &len, logFp);
     }
+    free(line);
 }
 
 void* rvm_map(rvm_t rvm, const char *segname, int size_to_create)
@@ -98,25 +98,23 @@ void* rvm_map(rvm_t rvm, const char *segname, int size_to_create)
 
     struct segment *segment = NULL;
     for (unsigned int i = 0; i < segments.size(); ++i) {
-        if (strcmp(segments[i].segname, segname) == 0) {
+        if (strcmp(segments[i]->segname, segname) == 0) {
             // segment already exists
-            if (segments[i].segsize != size_to_create) {
-                segments[i].segment = realloc(segments[i].segment, sizeof(char) * size_to_create);
-                segments[i].segsize = size_to_create;
+            if (segments[i]->segsize != size_to_create) {
+                segments[i]->segment = realloc(segments[i]->segment, sizeof(char) * size_to_create);
+                segments[i]->segsize = size_to_create;
             }
-            segment = &(segments[i]);
+            segment = segments[i];
         }
     }
 
-    struct segment seg;
     if (!segment) {
-        seg.segment = malloc(sizeof(char) * size_to_create);
-        seg.segname = strdup(segname);
-        seg.rvm = rvm;
-        seg.segsize = size_to_create;
-        seg.tid = -1;
-        segments.push_back(seg);
-        segment = &seg;
+        segment = (struct segment*) malloc(sizeof(struct segment));
+        segment->segment = malloc(sizeof(char) * size_to_create);
+        segment->segname = strdup(segname);
+        segment->rvm = rvm;
+        segment->segsize = size_to_create;
+        segments.push_back(segment);
     }
 
     if (recover) {
@@ -134,15 +132,16 @@ void* rvm_map(rvm_t rvm, const char *segname, int size_to_create)
 
 void rvm_unmap(rvm_t rvm, void *segbase)
 {
-    unsigned int index = -1;
+    int index = -1;
     for (unsigned int i = 0; i < segments.size(); ++i) {
-        if (segments[i].segment == segbase) {
+        if (segments[i]->segment == segbase) {
             index = i;
             break;
         }
     }
     if (index >= 0) {
-        free(segments[index].segment);
+        free(segments[index]->segment);
+        /* free(segments[index]); */
         segments.erase(segments.begin() + index);
     }
 }
@@ -152,7 +151,7 @@ void rvm_destroy(rvm_t rvm, const char *segname)
 	char temp[200];
 	
     for (unsigned int i = 0; i < segments.size(); ++i) {
-        if (strcmp(segments[i].segname, segname) == 0) {
+        if (strcmp(segments[i]->segname, segname) == 0) {
 			printf("Mapped segment cannot be destroyed\n");
             return;
         }
@@ -178,12 +177,12 @@ struct transaction {
 };
 
 static trans_t counter = 0;
-static vector<transaction> transactions;
+static vector<transaction*> transactions;
 
 static int find_trans(trans_t tid)
 {
     for (unsigned int i = 0; i < transactions.size(); ++i) {
-        if (transactions[i].id == tid) {
+        if (transactions[i]->id == tid) {
             return i;
         }
     }
@@ -193,28 +192,31 @@ static int find_trans(trans_t tid)
 static void remove_trans_from_list(trans_t tid)
 {
     int i = find_trans(tid);
+    free(transactions[i]);
     transactions.erase(transactions.begin() + i);
 }
 
 trans_t rvm_begin_trans(rvm_t rvm, int numsegs, void **segbases) 
 {
     // check if one of the segments is already in transaction
-    for (unsigned int i = 0; i < segments.size(); ++i) {
-        for (int j = 0; j < numsegs; ++j) {
-            if (segments[i].segment == segbases + j && segments[i].tid != -1) {
-                return (trans_t) -1;
+    for (int k = 0; k < numsegs; ++k) {
+        for (unsigned int i = 0; i < transactions.size(); ++i) {
+            for (int j = 0; j < transactions[i]->numsegs; ++j) {
+                if (segbases + k == transactions[i]->segbases + j) {
+                    return (trans_t) -1;
+                }
             }
         }
     }
 
     // add new transaction to list
-    struct transaction trans;
-    trans.id = counter++;
-    trans.rvm = rvm;
-    trans.numsegs = numsegs;
-    trans.segbases = segbases;
+    struct transaction *trans = (transaction *) malloc(sizeof(struct transaction));
+    trans->id = counter++;
+    trans->rvm = rvm;
+    trans->numsegs = numsegs;
+    trans->segbases = segbases;
     transactions.push_back(trans);
-    return (trans_t) -1;
+    return trans->id;
 }
 
 struct undo_record {
@@ -225,17 +227,17 @@ struct undo_record {
     void *data;
 };
 
-static vector<undo_record> undo_records;
+static vector<undo_record*> undo_records;
 
 void rvm_about_to_modify(trans_t tid, void *segbase, int offset, int size)
 {
-    struct undo_record record;
-    record.tid = tid;
-    record.segbase = segbase;
-    record.offset = offset;
-    record.size = size;
-    record.data = malloc(size);
-    memcpy(record.data, ((char *) segbase) + offset, size);
+    struct undo_record *record = (struct undo_record *) malloc(sizeof(struct undo_record));
+    record->tid = tid;
+    record->segbase = segbase;
+    record->offset = offset;
+    record->size = size;
+    record->data = malloc(size);
+    memcpy(record->data, ((char *) segbase) + offset, size);
     undo_records.push_back(record);
 }
 
@@ -243,19 +245,19 @@ static void save_log(void *segbase, int offset, int size)
 {
     unsigned int i = -1;
     for (i = 0; i < segments.size(); ++i) {
-        if (segments[i].segment == segbase) {
+        if (segments[i]->segment == segbase) {
             break;
         }
     }
     if (i >= 0) {
         char path[256];
-        snprintf(path, sizeof(path), "%s/logfile", segments[i].rvm.dir);
+        snprintf(path, sizeof(path), "%s/logfile", segments[i]->rvm.dir);
         FILE *f = fopen(path, "a");
 
-        void *data = malloc(sizeof(char) * (size+1));
+        void *data = malloc(size);
         memcpy(data, (char *) segbase + offset, size);
 
-        fprintf(f, "%s|||%d|||%d\n", segments[i].segname, offset, size);
+        fprintf(f, "%s|||%d|||%d\n", segments[i]->segname, offset, size);
         fwrite(data, 1, size, f);
         free(data);
         fclose(f);
@@ -264,11 +266,12 @@ static void save_log(void *segbase, int offset, int size)
 
 void rvm_commit_trans(trans_t tid)
 {
-    vector<undo_record>::iterator it = undo_records.begin();
+    vector<undo_record*>::iterator it = undo_records.begin();
     while (it != undo_records.end()) {
-        if (it->tid == tid) {
-            save_log(it->segbase, it->offset, it->size);
-            free(it->data);
+        if ((*it)->tid == tid) {
+            save_log((*it)->segbase, (*it)->offset, (*it)->size);
+            free((*it)->data);
+            free(*it);
             it = undo_records.erase(it);
         } else {
             it++;
@@ -279,11 +282,12 @@ void rvm_commit_trans(trans_t tid)
 
 void rvm_abort_trans(trans_t tid)
 {
-    vector<undo_record>::iterator it = undo_records.begin();
+    vector<undo_record*>::iterator it = undo_records.begin();
     while (it != undo_records.end()) {
-        if (it->tid == tid) {
-            memcpy((char *)it->segbase + it->offset, it->data, it->size);
-            free(it->data);
+        if ((*it)->tid == tid) {
+            memcpy((char *)(*it)->segbase + (*it)->offset, (*it)->data, (*it)->size);
+            free((*it)->data);
+            free(*it);
             it = undo_records.erase(it);
         } else {
             it++;
