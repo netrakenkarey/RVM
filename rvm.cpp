@@ -36,7 +36,7 @@ rvm_t rvm_init(const char *directory)
 	
 	int filestatus = stat(directory, &filestat);
 		
-	if( filestatus >= 0) {
+	if (filestatus >= 0) {
 		printf("Directory already exists");
     } else {
 		system(temp);
@@ -59,8 +59,12 @@ static void recover_data(const char *segname, void *segbase, int size, FILE *bas
     char *line = NULL;
     ssize_t result;
 
-    // read base file
-    fread(segbase, size, 1, baseFp);
+    result = getline(&line, NULL, baseFp);
+    if (result != -1) {
+        memcpy(segbase, line, size);
+    } else {
+        memset(segbase, 0, size);
+    }
     result = getline(&line, NULL, logFp);
     while (result != -1) {
         apply_log(segbase, line);
@@ -285,7 +289,50 @@ void rvm_abort_trans(trans_t tid)
     remove_trans_from_list(tid);
 }
 
+static void truncate_log_line(rvm_t rvm, char *line)
+{
+    char *temp;
+    char *segname = strtok(line, " ");
+
+    char path[256];
+    snprintf(path, sizeof(path), "%s/%s", rvm.dir, segname);
+	struct stat filestat;
+	int filestatus = stat(path, &filestat);
+    if (filestatus == 0) {
+        // read base file
+        FILE *baseFp = fopen(path, "r");
+        getline(&temp, NULL, baseFp);
+        fclose(baseFp);
+
+        int offset = atoi(strtok(NULL, " "));
+        int size = atoi(strtok(NULL, " "));
+        char *data = strtok(NULL, " ");
+
+        memcpy(temp + offset, data, size);
+        baseFp = fopen(path, "w");
+        fprintf(baseFp, "%s", temp);
+        fclose(baseFp);
+
+        free(temp);
+    }
+}
+
 void rvm_truncate_log(rvm_t rvm)
 {
+    char path[256];
+    snprintf(path, sizeof(path), "%s/logfile", rvm.dir);
+    FILE *logFp = fopen(path, "r");
 
+    char *line;
+    ssize_t result;
+    result = getline(&line, NULL, logFp);
+    while (result != -1) {
+        truncate_log_line(rvm, line);
+        free(line);
+        line = NULL;
+        result = getline(&line, NULL, logFp);
+    }
+    fclose(logFp);
+    logFp = fopen(path, "w");
+    fclose(logFp);
 }
