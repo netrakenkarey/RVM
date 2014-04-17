@@ -12,21 +12,15 @@ using namespace std;
 
 struct segment {
 	rvm_t rvm;
-	int mapped;
 	char *segname;
 	void *segment;
-	char *segpath;
 	int segsize;
-    trans_t transaction;
+    trans_t tid;
 	struct segment *next;
 };
 
-
-int rvmid_count = 0;
-int segmentlistflag = 0;
-FILE *backstore;
-
-struct segment *Head;
+static int rvmid_count = 0;
+static vector<segment> segments;
 
 rvm_t rvm_init(const char *directory)
 {
@@ -59,136 +53,54 @@ void* rvm_map(rvm_t rvm, const char *segname, int size_to_create)
         exit(-1);
 	}
 	
-	struct segment *N = (struct segment *)malloc (sizeof(struct segment));
 	struct stat filestat;
 	char temp[200];
-	struct segment *Segments = NULL;
-	int crash = 0;
 
 	strcpy(temp, rvm.dir);
 	strcat(temp,"/");
 	strcat(temp,segname);
 	int filestatus = stat(temp, &filestat);
 
-	if(Head == NULL) {
-	//Enter first element into the linked list
-
-        Segments = (struct segment *)malloc(sizeof(struct segment));
-       	Segments->segment = (char*)malloc(sizeof(char)*size_to_create);
-        Segments->segpath = (char*)malloc(sizeof(char)*100);
-        Segments->segname=(char*)malloc(sizeof(char)*100);
-        
-        //File exists in directory 
-        if( filestatus >=0) {
-            backstore = fopen(temp,"r");
-            //Here do I need to copy the data from the external file into the virtual memory i.e Segments->segment ?
-        
-            strcpy(Segments->segpath,segname);
-            strcpy(Segments->segname,segname);
-        
-            Segments->mapped = 1;
-            Segments->rvm = rvm;
-            Segments->next = NULL;
-            Head = Segments;
-            segmentlistflag=1;
-
-            fclose(backstore);
-            fflush(backstore);
-        
-        
-        } else {
-		
-            backstore = fopen(temp,"w");
-        
-            strcpy(Segments->segpath,segname);
-            strcpy(Segments->segname,segname);
-        
-            Segments->mapped = 1;
-            Segments->rvm = rvm;
-            Segments->next = NULL;
-            Head = Segments;
-            segmentlistflag=1;
-
-            fclose(backstore);
-            fflush(backstore);
-        }
-
-        return Segments->segment;
-	} else {
-        if(filestatus >=0) {
-            backstore = fopen(temp,"r"); //Im not sure if something needs to be done with the external file opened at this stage
-            Segments = Head;		
-        
-            while(Segments != NULL) {
-                if(strcmp(Segments->segname,segname) == 0) {
-                    if(Segments->mapped == 1) {
-                        printf("ERROR ! Segment already mapped");
-                        exit(-1);
-                    } else {
-                        if(Segments->segsize < 	size_to_create) {
-                            Segments->segment = (char*)realloc(Segments->segment,sizeof(char)*size_to_create);
-                        }
-                    }
-                    Segments->mapped =1 ;
-                    Segments->segpath = NULL ; 
-                    fclose(backstore);
-                    fflush(backstore);
-        
-                    return Segments->segment;			
-                
-                }	
-                if(Segments->next == NULL) {
-                    crash = 1;
-                    break ;
+    // file already exists
+    if (filestatus == 0) {
+        for (unsigned int i = 0; i < segments.size(); ++i) {
+            if (strcmp(segments[i].segname, segname) == 0) {
+                // segment already exists
+                if (segments[i].segsize != size_to_create) {
+                    segments[i].segment = realloc(segments[i].segment, sizeof(char) * size_to_create);
+                    segments[i].segsize = size_to_create;
                 }
+                return segments[i].segment;
             }
-            
-            if(crash ==1) {	//Crash Recovery code here
-            }
-            
-            fclose(backstore);
-            fflush(backstore);
-        
-        } else {
-            backstore = fopen(temp,"w");
-            Segments = Head;
-            while (Segments->next != NULL) {
-                Segments = Segments->next;
-            }
-            
-            N->segment =(char*)malloc(sizeof(char)*size_to_create);
-            N->segpath = (char*)malloc(sizeof(char)*100);
-            N->rvm = rvm;
-
-            N->segname=(char*)malloc(sizeof(char)*100);
-            strcpy(N->segpath,segname);
-            strcpy(N->segname,segname);
-            N->mapped = 1;
-            N->next = NULL;
-            Segments->next = N;
-            Segments = Segments->next;
-
-            fclose(backstore);
-            fflush(backstore);
         }
-	}
-	
-    return Segments->segment;
+
+        // TODO: recovery
+    }
+
+    struct segment seg;
+    seg.segment = malloc(sizeof(char) * size_to_create);
+    seg.segname = strdup(segname);
+    seg.rvm = rvm;
+    seg.segsize = size_to_create;
+    seg.tid = -1;
+    segments.push_back(seg);
+
+    return seg.segment;
 }
 
 void rvm_unmap(rvm_t rvm, void *segbase)
 {
-	struct segment *Segments = Head;
-	
-	while(Segments != NULL) {
-        if (Segments->segment == segbase) {
-			Segments->mapped = 0;
-			Segments->segpath = NULL;
-			return;
-		}
-
-	}
-	printf("Segment not in mapped virtual memory");
+    unsigned int index = -1;
+    for (unsigned int i = 0; i < segments.size(); ++i) {
+        if (segments[i].segment == segbase) {
+            index = i;
+            break;
+        }
+    }
+    if (index >= 0) {
+        free(segments[index].segment);
+        segments.erase(segments.begin() + index);
+    }
 }
 
 void rvm_destroy(rvm_t rvm, const char *segname)
@@ -224,14 +136,12 @@ static void remove_trans_from_list(trans_t tid)
 trans_t rvm_begin_trans(rvm_t rvm, int numsegs, void **segbases) 
 {
     // check if one of the segments is already in transaction
-    struct segment *segment = Head;
-    while (segment) {
-        for (int i = 0; i < numsegs; i++) {
-            if (segment->segment == segbases+i && segment->transaction != -1) {
+    for (unsigned int i = 0; i < segments.size(); ++i) {
+        for (int j = 0; j < numsegs; ++j) {
+            if (segments[i].segment == segbases + j && segments[i].tid != -1) {
                 return (trans_t) -1;
             }
         }
-        segment = segment->next;
     }
 
     // add new transaction to list
