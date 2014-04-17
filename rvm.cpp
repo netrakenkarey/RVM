@@ -54,19 +54,19 @@ static void apply_log(void *segbase, char *log)
     memcpy((char *) segbase + offset, data, size);
 }
 
-static void recover_data(const char *segname, void *segbase, int size, FILE *fp)
+static void recover_data(const char *segname, void *segbase, int size, FILE *baseFp, FILE *logFp)
 {
     char *line = NULL;
     ssize_t result;
 
     // read base file
-    fread(segbase, size, 1, fp);
-    result = getline(&line, NULL, fp);
+    fread(segbase, size, 1, baseFp);
+    result = getline(&line, NULL, logFp);
     while (result != -1) {
         apply_log(segbase, line);
         free(line);
         line = NULL;
-        result = getline(&line, NULL, fp);
+        result = getline(&line, NULL, logFp);
     }
 }
 
@@ -109,9 +109,14 @@ void* rvm_map(rvm_t rvm, const char *segname, int size_to_create)
     seg.tid = -1;
 
     if (recover) {
-        FILE *fp = fopen(temp, "r");
-        recover_data(seg.segname, seg.segment, seg.segsize, fp);
-        fclose(fp);
+        FILE *baseFp = fopen(temp, "r");
+        memset(temp, 0, 200);
+        strcpy(temp, rvm.dir);
+        strcat(temp,"/logfile");
+        FILE *logFp = fopen(temp, "r");
+        recover_data(seg.segname, seg.segment, seg.segsize, baseFp, logFp);
+        fclose(baseFp);
+        fclose(logFp);
     }
 
     segments.push_back(seg);
@@ -282,4 +287,5 @@ void rvm_abort_trans(trans_t tid)
 
 void rvm_truncate_log(rvm_t rvm)
 {
+
 }
