@@ -105,38 +105,25 @@ void rvm_unmap(rvm_t rvm, void *segbase)
 
 void rvm_destroy(rvm_t rvm, const char *segname)
 {
-	struct segment *searchseg = Head;
-	int flag =0;
 	char temp[200];
 	
-	while(searchseg != NULL)
-	{
-		if(strcmp(searchseg->segname,segname) ==0)
-		{
+    for (unsigned int i = 0; i < segments.size(); ++i) {
+        if (strcmp(segments[i].segname, segname) == 0) {
 			printf("\nMapped segment cannot be destroyed\n");
-			flag = 1;
-			break;
-		}
-		searchseg = searchseg->next;
-	}
-	 
-	if(flag == 0)
-	{
-	
+            return;
+        }
+    }
+
 	strcpy(temp, rvm.dir);
 	strcat(temp,"/");
 	strcat(temp,segname);
 	
 	int res = remove(temp);
-	if(res == 0)
-	{
+	if(res == 0) {
 		printf("\nSegment destroyed\n");
-	}
-	else
-	{
+	} else {
 		printf("\nSegment backstore does not exist\n");
 	}
-	return;
 }
 
 struct transaction {
