@@ -332,19 +332,23 @@ void rvm_truncate_log(rvm_t rvm)
 {
     char path[256];
     snprintf(path, sizeof(path), "%s/logfile", rvm.dir);
-    FILE *logFp = fopen(path, "r");
+	struct stat filestat;
+	int filestatus = stat(path, &filestat);
+    if (filestatus == 0) {
+        FILE *logFp = fopen(path, "r");
 
-    char *line;
-    size_t len;
-    ssize_t result;
-    result = getline(&line, &len, logFp);
-    while (result != -1) {
-        truncate_log_line(rvm, line);
-        free(line);
-        line = NULL;
+        char *line = NULL;
+        size_t len = 0;
+        ssize_t result;
         result = getline(&line, &len, logFp);
+        while (result != -1) {
+            truncate_log_line(rvm, line);
+            free(line);
+            line = NULL;
+            result = getline(&line, &len, logFp);
+        }
+        fclose(logFp);
+        logFp = fopen(path, "w");
+        fclose(logFp);
     }
-    fclose(logFp);
-    logFp = fopen(path, "w");
-    fclose(logFp);
 }
