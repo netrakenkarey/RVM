@@ -296,7 +296,7 @@ void rvm_abort_trans(trans_t tid)
     remove_trans_from_list(tid);
 }
 
-static void truncate_log_line(rvm_t rvm, char *line)
+static void truncate_log_line(rvm_t rvm, char *line, FILE *logFp)
 {
     void *temp;
     char *segname = strtok(line, "|||");
@@ -316,9 +316,8 @@ static void truncate_log_line(rvm_t rvm, char *line)
 
         int offset = atoi(strtok(NULL, "|||"));
         int log_size = atoi(strtok(NULL, "|||"));
-        char *data = strtok(NULL, "|||");
+        fread((char *) temp + offset, 1, log_size, logFp);
 
-        memcpy((char *) temp + offset, data, log_size);
         baseFp = fopen(path, "w");
         fprintf(baseFp, "%d\n", size);
         fwrite(temp, 1, size, baseFp);
@@ -342,7 +341,7 @@ void rvm_truncate_log(rvm_t rvm)
         ssize_t result;
         result = getline(&line, &len, logFp);
         while (result != -1) {
-            truncate_log_line(rvm, line);
+            truncate_log_line(rvm, line, logFp);
             free(line);
             line = NULL;
             result = getline(&line, &len, logFp);
