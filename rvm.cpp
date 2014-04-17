@@ -30,57 +30,42 @@ rvm_t rvm_init(const char *directory)
 	strcpy(temp , "mkdir ");
 	strcat(temp , directory);
 
-	strcpy(rvm.dir,directory);
     rvm.dir = strdup(directory);
 	rvm.rvmid = ++rvmid_count;
 	
 	int filestatus = stat(directory, &filestat);
 		
-	if (filestatus >= 0) {
-		printf("Directory already exists");
-    } else {
+	if (filestatus != 0) {
 		system(temp);
 	}
 	
 	return rvm;
 }
 
-static void apply_log(void *segbase, char *log)
-{
-    strtok(log, " ");
-    int offset = atoi(strtok(NULL, " "));
-    int size = atoi(strtok(NULL, " "));
-    void *data = strtok(NULL, " ");
-    memcpy((char *) segbase + offset, data, size);
-}
-
-static void recover_data(const char *segname, void *segbase, int size, FILE *baseFp, FILE *logFp)
+static void recover_data(const char *segname, void *segbase, FILE *baseFp, FILE *logFp)
 {
     char *line = NULL;
+    size_t len = 0;
     ssize_t result;
 
-    result = getline(&line, NULL, baseFp);
-    if (result != -1) {
-        memcpy(segbase, line, size);
-    } else {
-        memset(segbase, 0, size);
-    }
-    result = getline(&line, NULL, logFp);
+    int size = 0;
+    fscanf(baseFp, "%d\n", &size);
+    fread(segbase, 1, size, baseFp);
+    result = getline(&line, &len, logFp);
     while (result != -1) {
-        apply_log(segbase, line);
+        strtok(line, "|||");
+        int offset = atoi(strtok(NULL, "|||"));
+        int log_size = atoi(strtok(NULL, "|||"));
+        fread((char *) segbase + offset, 1, log_size, logFp);
+
         free(line);
         line = NULL;
-        result = getline(&line, NULL, logFp);
+        result = getline(&line, &len, logFp);
     }
 }
 
 void* rvm_map(rvm_t rvm, const char *segname, int size_to_create)
 {
-	if(rvm.dir == NULL) {
-		printf("Empty Directory");
-        exit(-1);
-	}
-	
 	struct stat filestat;
 	char temp[200];
 
@@ -92,40 +77,59 @@ void* rvm_map(rvm_t rvm, const char *segname, int size_to_create)
 
     // file already exists
     if (filestatus == 0) {
-        for (unsigned int i = 0; i < segments.size(); ++i) {
-            if (strcmp(segments[i].segname, segname) == 0) {
-                // segment already exists
-                if (segments[i].segsize != size_to_create) {
-                    segments[i].segment = realloc(segments[i].segment, sizeof(char) * size_to_create);
-                    segments[i].segsize = size_to_create;
-                }
-                return segments[i].segment;
-            }
+        int cur_size = 0;
+        FILE *baseFp = fopen(temp, "r");
+        fscanf(baseFp, "%d\n", &cur_size);
+        if (cur_size != size_to_create) {
+            void *temp_data = malloc(size_to_create);
+            fread(temp_data, 1, cur_size, baseFp);
+            baseFp = freopen(temp, "w", baseFp);
+            fprintf(baseFp, "%d\n", size_to_create);
+            fwrite(temp_data, 1, size_to_create, baseFp);
+            free(temp_data);
         }
+        fclose(baseFp);
         recover = 1;
+    } else {
+        FILE *baseFp = fopen(temp, "w");
+        fprintf(baseFp, "%d\n", size_to_create);
+        fclose(baseFp);
+    }
+
+    struct segment *segment = NULL;
+    for (unsigned int i = 0; i < segments.size(); ++i) {
+        if (strcmp(segments[i].segname, segname) == 0) {
+            // segment already exists
+            if (segments[i].segsize != size_to_create) {
+                segments[i].segment = realloc(segments[i].segment, sizeof(char) * size_to_create);
+                segments[i].segsize = size_to_create;
+            }
+            segment = &(segments[i]);
+        }
     }
 
     struct segment seg;
-    seg.segment = malloc(sizeof(char) * size_to_create);
-    seg.segname = strdup(segname);
-    seg.rvm = rvm;
-    seg.segsize = size_to_create;
-    seg.tid = -1;
+    if (!segment) {
+        seg.segment = malloc(sizeof(char) * size_to_create);
+        seg.segname = strdup(segname);
+        seg.rvm = rvm;
+        seg.segsize = size_to_create;
+        seg.tid = -1;
+        segments.push_back(seg);
+        segment = &seg;
+    }
 
     if (recover) {
-        FILE *baseFp = fopen(temp, "r");
         memset(temp, 0, 200);
         strcpy(temp, rvm.dir);
         strcat(temp,"/logfile");
+        FILE *baseFp = fopen(temp, "r");
         FILE *logFp = fopen(temp, "r");
-        recover_data(seg.segname, seg.segment, seg.segsize, baseFp, logFp);
+        recover_data(segment->segname, segment->segment, baseFp, logFp);
         fclose(baseFp);
         fclose(logFp);
     }
-
-    segments.push_back(seg);
-
-    return seg.segment;
+    return segment->segment;
 }
 
 void rvm_unmap(rvm_t rvm, void *segbase)
@@ -149,7 +153,7 @@ void rvm_destroy(rvm_t rvm, const char *segname)
 	
     for (unsigned int i = 0; i < segments.size(); ++i) {
         if (strcmp(segments[i].segname, segname) == 0) {
-			printf("\nMapped segment cannot be destroyed\n");
+			printf("Mapped segment cannot be destroyed\n");
             return;
         }
     }
@@ -160,9 +164,9 @@ void rvm_destroy(rvm_t rvm, const char *segname)
 	
 	int res = remove(temp);
 	if(res == 0) {
-		printf("\nSegment destroyed\n");
+		printf("Segment destroyed\n");
 	} else {
-		printf("\nSegment backstore does not exist\n");
+		printf("Segment backstore does not exist\n");
 	}
 }
 
@@ -235,7 +239,7 @@ void rvm_about_to_modify(trans_t tid, void *segbase, int offset, int size)
     undo_records.push_back(record);
 }
 
-static void save_log(void *segbase, int offset, int size, void *data)
+static void save_log(void *segbase, int offset, int size)
 {
     unsigned int i = -1;
     for (i = 0; i < segments.size(); ++i) {
@@ -248,12 +252,12 @@ static void save_log(void *segbase, int offset, int size, void *data)
         snprintf(path, sizeof(path), "%s/logfile", segments[i].rvm.dir);
         FILE *f = fopen(path, "a");
 
-        char *data_s = (char *) malloc(sizeof(char) * (size+1));
-        memcpy(data_s, data, size);
-        data_s[size] = 0;
+        void *data = malloc(sizeof(char) * (size+1));
+        memcpy(data, (char *) segbase + offset, size);
 
-        fprintf(f, "%s %d %d %s\n", segments[i].segname, offset, size, data_s);
-        free(data_s);
+        fprintf(f, "%s|||%d|||%d\n", segments[i].segname, offset, size);
+        fwrite(data, 1, size, f);
+        free(data);
         fclose(f);
     }
 }
@@ -263,7 +267,7 @@ void rvm_commit_trans(trans_t tid)
     vector<undo_record>::iterator it = undo_records.begin();
     while (it != undo_records.end()) {
         if (it->tid == tid) {
-            save_log(it->segbase, it->offset, it->size, it->data);
+            save_log(it->segbase, it->offset, it->size);
             free(it->data);
             it = undo_records.erase(it);
         } else {
@@ -278,9 +282,8 @@ void rvm_abort_trans(trans_t tid)
     vector<undo_record>::iterator it = undo_records.begin();
     while (it != undo_records.end()) {
         if (it->tid == tid) {
-            save_log(it->segbase, it->offset, it->size, it->data);
-            free(it->data);
             memcpy((char *)it->segbase + it->offset, it->data, it->size);
+            free(it->data);
             it = undo_records.erase(it);
         } else {
             it++;
@@ -291,8 +294,8 @@ void rvm_abort_trans(trans_t tid)
 
 static void truncate_log_line(rvm_t rvm, char *line)
 {
-    char *temp;
-    char *segname = strtok(line, " ");
+    void *temp;
+    char *segname = strtok(line, "|||");
 
     char path[256];
     snprintf(path, sizeof(path), "%s/%s", rvm.dir, segname);
@@ -300,17 +303,21 @@ static void truncate_log_line(rvm_t rvm, char *line)
 	int filestatus = stat(path, &filestat);
     if (filestatus == 0) {
         // read base file
+        int size = 0;
         FILE *baseFp = fopen(path, "r");
-        getline(&temp, NULL, baseFp);
+        fscanf(baseFp, "%d\n", &size);
+        temp = malloc(size);
+        fread(temp, 1, size, baseFp);
         fclose(baseFp);
 
-        int offset = atoi(strtok(NULL, " "));
-        int size = atoi(strtok(NULL, " "));
-        char *data = strtok(NULL, " ");
+        int offset = atoi(strtok(NULL, "|||"));
+        int log_size = atoi(strtok(NULL, "|||"));
+        char *data = strtok(NULL, "|||");
 
-        memcpy(temp + offset, data, size);
+        memcpy((char *) temp + offset, data, log_size);
         baseFp = fopen(path, "w");
-        fprintf(baseFp, "%s", temp);
+        fprintf(baseFp, "%d\n", size);
+        fwrite(temp, 1, size, baseFp);
         fclose(baseFp);
 
         free(temp);
@@ -324,13 +331,14 @@ void rvm_truncate_log(rvm_t rvm)
     FILE *logFp = fopen(path, "r");
 
     char *line;
+    size_t len;
     ssize_t result;
-    result = getline(&line, NULL, logFp);
+    result = getline(&line, &len, logFp);
     while (result != -1) {
         truncate_log_line(rvm, line);
         free(line);
         line = NULL;
-        result = getline(&line, NULL, logFp);
+        result = getline(&line, &len, logFp);
     }
     fclose(logFp);
     logFp = fopen(path, "w");
