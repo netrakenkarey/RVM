@@ -176,25 +176,35 @@ void rvm_about_to_modify(trans_t tid, void *segbase, int offset, int size)
     undo_records.push_back(record);
 }
 
-static void save_log(struct undo_record *record)
+static void save_log(void *segbase, int offset, int size, void *data)
 {
+    unsigned int i = -1;
+    for (i = 0; i < segments.size(); ++i) {
+        if (segments[i].segment == segbase) {
+            break;
+        }
+    }
+    if (i >= 0) {
+        char path[256];
+        snprintf(path, sizeof(path), "%s/%s", segments[i].rvm.dir, segments[i].segname);
+        FILE *f = fopen(path, "a");
+        fwrite(((char *) data) + offset, size, 1, f);
+        fprintf(f, "\n%d %d\n", offset, size);
+        fclose(f);
+    }
 }
 
 void rvm_commit_trans(trans_t tid)
 {
-    /* struct undo_record *record = undo_begin; */
-    /* struct undo_record *next; */
-    /* while (record) { */
-    /*     if (record->tid == tid) { */
-    /*         save_log(record); */
-    /*         next = record->next; */
-    /*         remove_undo_from_list(record); */
-    /*         record = next; */
-    /*     } else { */
-    /*         record = record->next; */
-    /*     } */
-    /* } */
-
+    vector<undo_record>::iterator it = undo_records.begin();
+    while (it != undo_records.end()) {
+        if (it->tid == tid) {
+            save_log(it->segbase, it->offset, it->size, it->data);
+            it = undo_records.erase(it);
+        } else {
+            it++;
+        }
+    }
     remove_trans_from_list(tid);
 }
 
