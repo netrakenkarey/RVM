@@ -37,7 +37,7 @@ rvm_t rvm_init(const char *directory)
 	rvm_t rvm;
 	char temp[200];
 	struct stat filestat;
-
+	rvm.dir = (char*)malloc(sizeof(char)*100);
 	
 	logfile_path =	(char*)malloc(200*sizeof(char));
 	
@@ -50,7 +50,7 @@ rvm_t rvm_init(const char *directory)
 	int filestatus = stat(directory, &filestat);
 		
 	if( filestatus >= 0)
-		printf("Directory already exists");
+		printf("\nDirectory already exists\n");
 	else
 	{
 		system(temp);
@@ -66,7 +66,7 @@ rvm_t rvm_init(const char *directory)
 	return rvm;
 }
 
-void* rvm_map(rvm_t rvm, const char *segname, int size_to_create)
+/*void* rvm_map(rvm_t rvm, const char *segname, int size_to_create)
 {
 	if(rvm.dir == NULL)
 	{
@@ -234,13 +234,61 @@ void rvm_unmap(rvm_t rvm, void *segbase)
 	}
 	printf("Segment not in mapped virtual memory");
 }
+*/
+void rvm_destroy(rvm_t rvm, const char *segname)
+{
+	struct segment *searchseg = Head;
+	int flag =0;
+	char temp[200];
+	
+	while(searchseg != NULL)
+	{
+		if(strcmp(searchseg->segname,segname) ==0)
+		{
+			printf("\nMapped segment cannot be destroyed\n");
+			flag = 1;
+			break;
+		}
+		searchseg = searchseg->next;
+	}
+	 
+	if(flag == 0)
+	{
+	
+	strcpy(temp, rvm.dir);
+	strcat(temp,"/");
+	strcat(temp,segname);
+	
+	int res = remove(temp);
+	if(res == 0)
+	{
+		printf("\nSegment destroyed\n");
+	}
+	else
+	{
+		printf("\nSegment backstore does not exist\n");
+	}
+	return;
+}
 
+
+}
 
 int main()
 {
-	//rvm_t r;
-	//rvm_init("backstore");
-	//rvm_map(r , "segment1" , 100000);
+	rvm_t r;
+	r = rvm_init("backstore");
+	char temp[200];
+	
+
+	strcpy(temp, r.dir);
+	strcat(temp,"/");
+	strcat(temp,"NETRA");
+	backstore = fopen(temp,"w");
+	fclose(backstore);
+	fflush(backstore);
+	
+	rvm_destroy(r , "NETRA");
 }
 
 
