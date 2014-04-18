@@ -20,6 +20,7 @@ struct segment {
 static int rvmid_count = 0;
 static vector<segment*> segments;
 
+// creates directory if it doesn't exist
 rvm_t rvm_init(const char *directory)
 {
 	rvm_t rvm;
@@ -41,6 +42,7 @@ rvm_t rvm_init(const char *directory)
 	return rvm;
 }
 
+// restores data from base and log files
 static void recover_data(const char *segname, void *segbase, FILE *baseFp, FILE *logFp)
 {
     char *line = NULL;
@@ -64,26 +66,30 @@ static void recover_data(const char *segname, void *segbase, FILE *baseFp, FILE 
     free(line);
 }
 
+// map segment
 void* rvm_map(rvm_t rvm, const char *segname, int size_to_create)
 {
 	struct stat filestat;
-	char temp[200];
+	char base[200];
+	char log[200];
 
-	strcpy(temp, rvm.dir);
-	strcat(temp,"/");
-	strcat(temp,segname);
-	int filestatus = stat(temp, &filestat);
+	strcpy(base, rvm.dir);
+	strcat(base,"/");
+	strcat(base,segname);
+	strcpy(log, rvm.dir);
+	strcat(log,"/logfile");
+	int filestatus = stat(base, &filestat);
     int recover = 0;
 
     // file already exists
     if (filestatus == 0) {
         int cur_size = 0;
-        FILE *baseFp = fopen(temp, "r");
+        FILE *baseFp = fopen(base, "r");
         fscanf(baseFp, "%d\n", &cur_size);
         if (cur_size != size_to_create) {
             void *temp_data = malloc(size_to_create);
             fread(temp_data, 1, cur_size, baseFp);
-            baseFp = freopen(temp, "w", baseFp);
+            baseFp = freopen(base, "w", baseFp);
             fprintf(baseFp, "%d\n", size_to_create);
             fwrite(temp_data, 1, size_to_create, baseFp);
             free(temp_data);
@@ -91,12 +97,13 @@ void* rvm_map(rvm_t rvm, const char *segname, int size_to_create)
         fclose(baseFp);
         recover = 1;
     } else {
-        FILE *baseFp = fopen(temp, "w");
+        FILE *baseFp = fopen(base, "w");
         fprintf(baseFp, "%d\n", size_to_create);
         fclose(baseFp);
     }
 
     struct segment *segment = NULL;
+    // look if segment already mapped
     for (unsigned int i = 0; i < segments.size(); ++i) {
         if (strcmp(segments[i]->segname, segname) == 0) {
             // segment already exists
@@ -118,11 +125,8 @@ void* rvm_map(rvm_t rvm, const char *segname, int size_to_create)
     }
 
     if (recover) {
-        memset(temp, 0, 200);
-        strcpy(temp, rvm.dir);
-        strcat(temp,"/logfile");
-        FILE *baseFp = fopen(temp, "r");
-        FILE *logFp = fopen(temp, "r");
+        FILE *logFp = fopen(log, "r");
+        FILE *baseFp = fopen(base, "r");
         recover_data(segment->segname, segment->segment, baseFp, logFp);
         fclose(baseFp);
         fclose(logFp);
@@ -130,6 +134,7 @@ void* rvm_map(rvm_t rvm, const char *segname, int size_to_create)
     return segment->segment;
 }
 
+// unmap segment
 void rvm_unmap(rvm_t rvm, void *segbase)
 {
     int index = -1;
@@ -141,11 +146,12 @@ void rvm_unmap(rvm_t rvm, void *segbase)
     }
     if (index >= 0) {
         free(segments[index]->segment);
-        /* free(segments[index]); */
+        free(segments[index]);
         segments.erase(segments.begin() + index);
     }
 }
 
+// delete backing file
 void rvm_destroy(rvm_t rvm, const char *segname)
 {
 	char temp[200];
@@ -196,6 +202,7 @@ static void remove_trans_from_list(trans_t tid)
     transactions.erase(transactions.begin() + i);
 }
 
+// begin transaction
 trans_t rvm_begin_trans(rvm_t rvm, int numsegs, void **segbases) 
 {
     // check if one of the segments is already in transaction
@@ -233,6 +240,7 @@ void rvm_about_to_modify(trans_t tid, void *segbase, int offset, int size)
 {
     int i = find_trans(tid);
     if (i >= 0) {
+        // check that segment is in transaction
         int ok = 0;
         for (int j = 0; j < transactions[i]->numsegs; ++j) {
             if (*(transactions[i]->segbases + j) == segbase) {
@@ -253,6 +261,7 @@ void rvm_about_to_modify(trans_t tid, void *segbase, int offset, int size)
     }
 }
 
+// save redo log
 static void save_log(void *segbase, int offset, int size)
 {
     unsigned int i = -1;
@@ -276,6 +285,7 @@ static void save_log(void *segbase, int offset, int size)
     }
 }
 
+// commit changes
 void rvm_commit_trans(trans_t tid)
 {
     vector<undo_record*>::iterator it = undo_records.begin();
@@ -292,6 +302,7 @@ void rvm_commit_trans(trans_t tid)
     remove_trans_from_list(tid);
 }
 
+// revert changes
 void rvm_abort_trans(trans_t tid)
 {
     vector<undo_record*>::iterator it = undo_records.begin();
@@ -308,6 +319,7 @@ void rvm_abort_trans(trans_t tid)
     remove_trans_from_list(tid);
 }
 
+// apply redo log to backing file
 static void truncate_log_line(rvm_t rvm, char *line, FILE *logFp)
 {
     void *temp;
@@ -339,6 +351,7 @@ static void truncate_log_line(rvm_t rvm, char *line, FILE *logFp)
     }
 }
 
+// truncate logfile
 void rvm_truncate_log(rvm_t rvm)
 {
     char path[256];
