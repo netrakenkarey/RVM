@@ -202,7 +202,7 @@ trans_t rvm_begin_trans(rvm_t rvm, int numsegs, void **segbases)
     for (int k = 0; k < numsegs; ++k) {
         for (unsigned int i = 0; i < transactions.size(); ++i) {
             for (int j = 0; j < transactions[i]->numsegs; ++j) {
-                if (segbases + k == transactions[i]->segbases + j) {
+                if (*(segbases + k) == *(transactions[i]->segbases + j)) {
                     return (trans_t) -1;
                 }
             }
@@ -231,14 +231,26 @@ static vector<undo_record*> undo_records;
 
 void rvm_about_to_modify(trans_t tid, void *segbase, int offset, int size)
 {
-    struct undo_record *record = (struct undo_record *) malloc(sizeof(struct undo_record));
-    record->tid = tid;
-    record->segbase = segbase;
-    record->offset = offset;
-    record->size = size;
-    record->data = malloc(size);
-    memcpy(record->data, ((char *) segbase) + offset, size);
-    undo_records.push_back(record);
+    int i = find_trans(tid);
+    if (i >= 0) {
+        int ok = 0;
+        for (int j = 0; j < transactions[i]->numsegs; ++j) {
+            if (*(transactions[i]->segbases + j) == segbase) {
+                ok = 1;
+                break;
+            }
+        }
+        if (ok == 1) {
+            struct undo_record *record = (struct undo_record *) malloc(sizeof(struct undo_record));
+            record->tid = tid;
+            record->segbase = segbase;
+            record->offset = offset;
+            record->size = size;
+            record->data = malloc(size);
+            memcpy(record->data, ((char *) segbase) + offset, size);
+            undo_records.push_back(record);
+        }
+    }
 }
 
 static void save_log(void *segbase, int offset, int size)
