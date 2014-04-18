@@ -1,0 +1,21 @@
+Recoverable Virtual Memory AOS Proj 4
+
+Azat Khasanshin, Netra Kenkarey
+
+1. How you use logfiles to accomplish persistency plus transaction semantics.
+
+We use logfiles to store records of changes being made to mapped segments. If user program crashes,
+data can be restored from these logfiles and backing files. This allows us to achieve persistency.
+The changes are written to logfiles only when user calls rvm_commit_transaction. In case user program decides
+to abort changes, initial values are restored from in-memory undo records. This allows us to achieve transaction semantics.
+
+2. What goes in them? How do the files get cleaned up, so that they do not expand indefinitely?
+
+For each call of rvm_about_to_modify we store:
+    - segment name
+    - offset
+    - size
+    - new data
+
+Log files can be cleaned by calling rvm_truncate_log. This function goes through the changes and applies them to respective backing
+files of each segment.
